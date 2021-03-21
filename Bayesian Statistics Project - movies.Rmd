@@ -1,0 +1,316 @@
+---
+title: "Bayesian Modeling and Prediction for Movies"
+author: "Anoop"
+date: "21 March 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+## Load required packages
+
+```{r load-packages, message=FALSE}
+library(ggplot2)
+library(dplyr)
+library(statsr)
+library(BAS)
+library(MASS)
+library(GGally)
+library(gridExtra)
+```
+
+## Load Data
+
+```{r}
+load("movies.Rdata")
+```
+## Introduction
+
+This project is being carried out with the aim to find attributes that make a movie popular. Also, we are going to find out other attributes that might interest to us using Exploaratory Data Dnalysis(EDA) and will use to Bayesian statistics for making modelling and prediction.
+
+## Part 1: Data
+
+```{r}
+summary(movies)
+glimpse(movies)
+```
+
+
+**The dataset consists of 651 randomly selected movies which were produced and released before 2016  and it includes information from Rotten Tomatoes and IMDB for a random sample of movies.We are only able to draw correlation as it done by random sampling. Since the data is collected using random sampling and given the shear size of the observations involved, it is possible to generalize the results to a larger audience. Since the data is taken from an English-speaking platfrom, and much of it is catered to the English speakers, it is safe to assume that there will be prejudice in favor of English movies compared to movies from foreifn countries such as Bollywood, Chinese, Korean, et al.**
+
+## Part 2: Data Manipulation
+
+We are going to create a few new variables to assist in our EDA. Below is their description:
+
+
+1) ```feature_film```: "yes" if ```title_type``` is Feature Film, "no" otherwise.
+2) ```drama```: "yes" if ```genre``` is Drama, "no" otherwise runtime.
+3) ```mpaa_rating_R```: "yes" if ```mpaa_rating``` is R, "no" otherwise
+4) ```oscar_season```: "yes" if movie is released in November, October, or December (based on ```thtr_rel_month```), "no" otherwise.
+5) ```summer_season```: "yes" if movie is released in May, June, July, or August (based on ```thtr_rel_month```), "no" otherwise.
+
+```{r}
+movies <- movies %>%
+  mutate(feature_film = ifelse(title_type == "Feature Film", "yes", "no"),
+         drama = ifelse(genre == "Drama", "yes", "no"),
+         mpaa_rating_R = ifelse(mpaa_rating == "R","yes","no"),
+         oscar_season = ifelse(thtr_rel_month == 11 | thtr_rel_month == 10 | thtr_rel_month == 12, "yes", "no"),
+         summer_season = ifelse(thtr_rel_month == 5 | thtr_rel_month == 6 | thtr_rel_month == 7 | thtr_rel_month == 8, "yes","no"))
+```
+
+We'll then create a new dataframe "movies2" that will include a subset of the total variables
+
+```{r}
+movies2_features <- c("audience_score", "feature_film", "drama", "runtime", "mpaa_rating_R", "thtr_rel_year", "oscar_season", "summer_season", "imdb_rating", "imdb_num_votes", "critics_score", "best_pic_nom", "best_pic_win", "best_actor_win", "best_actress_win", "best_dir_win", "top200_box")
+movies2 <- movies[movies2_features]
+```
+
+## Part 3: Exploratory Data Analysis (EDA)
+
+We will begin our EDA by looking at the summary of the newly created data frame "movies2"
+
+```{r}
+summary(movies2)
+```
+This gives us how spread each variabe in the dataset is.
+
+Now let's look at the structure of the dataframe.
+
+```{r}
+str(movies2)
+```
+
+
+Let's create a boxplot to understand how the newly created variables interact with "audience_score"
+
+```{r}
+plot1 <- ggplot(movies2, aes(x=mpaa_rating_R,y=audience_score))+
+            geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+  
+plot2 <- ggplot(movies2, aes(x=oscar_season, y=audience_score))+
+            geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+  
+plot3 <- ggplot(movies2, aes(x=summer_season,y=audience_score))+
+            geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+  
+plot4 <- ggplot(movies2, aes(x=feature_film, y=audience_score))+
+            geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+  
+plot5 <- ggplot(movies2, aes(x=drama, y=audience_score))+
+            geom_boxplot(outlier.colour="red", outlier.shape=8,
+                outlier.size=4)
+            
+grid.arrange(plot1,plot2,plot3,plot4,plot5, ncol=3)
+```
+
+Let's explore the correlation between the audience score and the newly created variables using more visualization charts.
+
+
+```{r, fig.width=15, fig.height=15}
+suppressWarnings(suppressMessages(print(ggpairs(movies2, columns = 1:8))))
+```
+
+```{r, fig.width=20, fig.height=20}
+suppressWarnings(suppressMessages(print(ggpairs(movies2, columns = c(1,9:17)))))
+```
+
+From the charts above, we can confer that there exists a high correlation between ```audience_score``` and ```critics_score```
+
+Let's further explore its correlation using a scatterplot fitted with a regression line.
+
+```{r}
+cor(movies2$audience_score, movies2$critics_score)
+```
+
+```{r}
+ggplot(data=movies2, aes(x = audience_score, y = critics_score)) +
+  geom_jitter(alpha  = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, colour = "red")
+```
+
+Let's examine the relation between ```imdb_rating``` and ```audience_score``` similarly.
+
+```{r}
+cor(movies2$audience_score, movies2$imdb_rating)
+```
+
+
+```{r}
+ggplot(data=movies2, aes(x = audience_score, y = imdb_rating)) +
+  geom_jitter(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, colour = "red")
+```
+
+From the charts above we can understand the high correlation of audience_score with both set of variables.
+
+
+## Part 4: Modeling
+
+We will start by incoporating the linear model by examining the relationship between the response variable with all the predictors.
+
+As for modeling, we will use the ```stepAIC``` function from the ```MASS``` library  in the backwards direction until we reach a stage where we cannot further lower the AIC.
+
+```{r}
+as_model <- lm(audience_score ~ ., data= na.omit(movies2))
+as_model
+```
+
+## Creating the model based on AIC
+
+```{r}
+stepAIC.model <- stepAIC(as_model, direction = "backward", trace = TRUE)
+```
+
+The final model built using AIC consists of the following variables:
+
+```runtime + mpaa_rating_R + thtr_rel_year + imdb_rating + critics_score + best_pic_nom + best_actor_win```
+
+
+```{r}
+AIC.lm_model <- lm(audience_score ~ runtime + mpaa_rating_R + thtr_rel_year + imdb_rating + critics_score + best_pic_nom + best_actor_win + best_actress_win, data=movies2)
+```
+
+Let's take a look at the coefficients of this model:
+
+```{r}
+AIC.lm_model$coefficients
+```
+Let's take a look at the standard deviation of this model:
+
+```{r}
+summary(AIC.lm_model)$sigma
+```
+
+Let's plot the residuals of this model:
+
+```{r}
+ggplot(data=AIC.lm_model, aes(x=AIC.lm_model$residuals)) + geom_histogram(bin = 30)
+```
+
+We can see that the residuals are normally distributed.
+
+## Creating the model using BIC
+
+we will use the ```stepAIC``` function from the ```MASS``` library  in the backwards direction until we reach a stage where we cannot further lower the BIC.
+
+```{r}
+stepBIC.model <- stepAIC(as_model, direction = "backward", k=log(nrow(movies2)), trace = TRUE)
+```
+
+The final model will use the following variables:
+
+```audience_score ~ runtime + imdb_rating + critics_score```
+
+```{r}
+BIC.lm_model <- lm(audience_score ~ runtime + imdb_rating + critics_score, data=movies2)
+BIC.lm_model
+```
+
+```{r}
+BIC.lm_model$coefficients
+summary(BIC.lm_model)$sigma
+```
+
+Taking a look at the residuals:
+
+```{r}
+ggplot(data=BIC.lm_model, aes(x=BIC.lm_model$residuals)) + geom_histogram()
+```
+
+***We can see that the residuals are normally distributed.***
+
+## Creating the model using Bayesian Averaging
+
+```{r}
+model.bas <- bas.lm(audience_score ~ .,
+       prior ="BIC",
+       modelprior = uniform(),
+       data = na.omit(movies2))
+model.bas
+```
+
+According to this model, there is a 100% chance that ```imdb_rating``` will be included in the final model. Other noteworthy variables are ```runtime``` (~47%), ```critics_score``` (~89%). The variable with the nearest score to these is ```mpaa_rating_R:yes``` at ~20%.
+
+```{r}
+confint(coef(model.bas))
+```
+
+```{r}
+summary(model.bas)
+```
+
+The best model chosen contains the variables ```runtime```, ```imdb_rating```, and ```critics_score```. Notice that this is the same model created by the backwards stepwise BIC method above.
+
+Below, we can visualize the goodness of each of the models analyzed using the ```bas.lm``` function. The best model (rank 1) shows on the left, with the colored squares representing variables that would be selected for that particular model.
+
+```{r, fig.width=10, fig.height=10}
+image(model.bas, rotate = F)
+```
+
+```{r}
+qqnorm(BIC.lm_model$residuals, col="aquamarine4")
+qqline(BIC.lm_model$residuals)
+```
+
+We can see a normal distribution here.
+
+Let's plot the residuals against the fitted values here.
+
+```{r}
+plot(BIC.lm_model$residuals ~ BIC.lm_model$fitted, col="red")
+abline(h=0, lty=2)
+```
+
+From the plot, we can infer the presence of left skewness but the data is generally scattered around 0.
+
+Let's plot the absolute values of the residuals against the fitted values here.
+
+```{r}
+plot(abs(BIC.lm_model$residuals) ~ BIC.lm_model$fitted, col="red")
+abline(h=0, lty=2)
+```
+
+We don't see a fan shaped figure here;hence the condition is met.
+
+## Prediction
+
+The movie I've chosen is _Avengers: Endgame(2019)_. The information I will be using for the prediction comes from:
+
+[IMDB](http://https://www.imdb.com/title/tt4154796/) and [Rotten Tomatoes.](https://https://www.rottentomatoes.com/m/avengers_endgame)
+
+Let's create a data frame containing _Avengers: Endgame(2019)_'s information.
+
+```{r}
+Endgame_df <- data.frame(imdb_rating = 8.4, runtime = 181, critics_score = 94, mpaa_rating_R="no", thtr_rel_year=2016, best_pic_nom="no",best_actor_win="no", best_actress_win="no")
+
+Endgame_df
+```
+
+We will now run predictions using both the BIC and AIC models, to contrast them. Note that the set of variables the BIC model uses is a subset of the variables the AIC model uses.
+
+```{r}
+predict(BIC.lm_model, newdata = Endgame_df, interval = "prediction", level = 0.95)
+```
+
+
+The BIC model predicts a score of 89.4644
+
+```{r}
+predict(AIC.lm_model, newdata = Endgame_df, interval = "prediction", level = 0.95)
+```
+
+The AIC model predicts a score of 89.61485
+
+As the true score was 88, the AIC model was only marginally more accurate (89.4644% accuracy vs 89.61485% accuracy)
+
+## Conclusion
+
+The model created using the ```stepAIC``` tuned toward _AIC_ was the same model found to be ideal by ```bas.lm```. In the end, the AIC and BIC models scored almost identically. I believe if the scope of this project were increased, there would be the possibility of normally distributed errors. A method to deal with these issues-- which was not touched on in this project-- was variable transformation such as log transformation.
